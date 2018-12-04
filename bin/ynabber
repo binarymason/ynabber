@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+
+require 'faraday'
+require 'json'
+
+TOKEN = File.read(File.join(ENV['HOME'], '.ynab'))
+unless TOKEN
+  puts "no access token present. exiting."
+  exit 1
+end
+
+uri = 'https://api.youneedabudget.com'
+endpoint = 'v1/budgets/last-used/categories'
+
+res = Faraday.get("#{uri}/#{endpoint}") do |req|
+  req.headers['Authorization'] = "Bearer #{TOKEN}"
+end
+
+json = JSON.parse(res.body)
+c = json.dig('data', 'category_groups' )
+totals = c.map do |g|
+  {
+    group: g['name'],
+    budgeted: g['categories'].map { |c| c['budgeted'] / 1000 }.reduce(&:+)
+  }
+end
+
+totals.reject! { |hsh| hsh[:budgeted].to_i == 0 }
+
+total_budgeted = totals.inject(0) { |sum, hsh| sum + hsh[:budgeted]  }.to_f
+
+result = totals.sort_by { |hsh| hsh[:budgeted]  }.reverse.map do |hsh|
+  b = hsh.fetch(:budgeted).to_f
+  percentage =  ((b / total_budgeted) * 100).round(2)
+  sprintf '%-30s %20s %20s', hsh[:group], "#{percentage}%", "$#{b.round(2)}"
+end
+
+puts '=' * 75
+puts result
+puts '=' * 75
+puts sprintf '%75s', "TOTAL: $#{total_budgeted.round(2)}"
